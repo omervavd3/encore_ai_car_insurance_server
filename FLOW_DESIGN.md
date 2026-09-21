@@ -107,27 +107,31 @@ LLM exit rather than deterministic because the judgment is conversational — th
 
 **Routing — deterministic, not LLM.** This is data, not judgment:
 
-| Condition | Goes to |
-|---|---|
-| `success == true` | **B** |
-| `error_code` = `vehicle_not_found` | **A** (re-ask plate) |
-| `error_code` = `invalid_license_plate` | **A** (re-ask plate) |
-| `error_code` = `upstream_unavailable` | **Speak Message** → End |
-| `error_code` = `upstream_error` | **Speak Message** → End |
+| Condition | HTTP | Goes to |
+|---|---|---|
+| `success == true` | 200 | **B** |
+| `error_code` = `vehicle_not_found` | 404 | **A** (re-ask plate) |
+| `error_code` = `invalid_license_plate` | 400 | **A** (re-ask plate) |
+| `error_code` = `invalid_request` | 422 | **A** (re-ask plate) |
+| `error_code` = `unauthorized` | 401 | **Speak Message** → End (your key is wrong — a build error, not a user error) |
+| `error_code` = `upstream_unavailable` | 503 | **Speak Message** → End |
+| `error_code` = `upstream_error` | 502 | **Speak Message** → End |
 
 This covers all three error cases the assignment requires: vehicle not found, validation failed, API not
 responding.
 
-> ### ⚠️ Check this before building the rest
-> The Part A service returns **HTTP 200 on every error** (see `app/routers/vehicle.py` — the `_error()`
-> helper is returned, not raised). So if the API node's success/error routing keys off the **status
-> code**, every failure will take the success edge and the not-found branch will never fire.
->
-> Two ways out, pick one:
-> 1. Branch on the **response body**: `success == false`, then on `error_code`.
-> 2. Change the service to return real HTTP status codes (400/404/502) and branch on status.
->
-> Verify which the API node actually supports before wiring the error edges.
+**Branch on either the status or the body — they always agree.** Every response the service emits
+carries the same three fields, so the API node can key off whichever it supports:
+
+```json
+{"success": false, "status_code": 404, "error_code": "vehicle_not_found", "message": "..."}
+{"success": true,  "status_code": 200, "data": {"manufacturer": "...", ...}}
+```
+
+`status_code` in the body is deliberately redundant with the HTTP status line. It's there because some
+API nodes only expose the parsed body to their routing expressions, and duplicating the status means
+you don't have to find out which kind you have before wiring the error edges. Both are produced from a
+single lookup in `app/errors.py`, so they can't drift apart.
 
 ---
 
@@ -261,8 +265,9 @@ is the more realistic production answer, Speak Message is the simpler one.
    with 401, including the platform's.
 3. **Confirm the API node can send a custom header** (`X-API-Key`). The auth isn't required by the
    assignment — it's your own "I don't leave endpoints open" choice — but it has to work end to end.
-4. **Settle the status-code question** in the API node warning above.
-5. **Verify the upstream really 404s** on an unknown plate. The `vehicle_not_found` branch depends on
-   it, and it's currently an untested assumption in the wrapper.
+4. ~~Settle the status-code question in the API node warning above.~~ Settled: the service returns real
+   HTTP statuses *and* mirrors them in the body as `status_code`. Branch on either.
+5. ~~Verify the upstream really 404s on an unknown plate.~~ Verified against the live registry: plate
+   `99999999` comes back 404, so the `vehicle_not_found` branch fires as designed.
 6. **Turn on Test Agent's debug view** (⋮ menu → Show debug info) before your first test run — it shows
    which node you're on, what's saved, and why a branch fired.
