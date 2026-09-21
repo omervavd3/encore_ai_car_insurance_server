@@ -1,0 +1,12 @@
+# Keep the source upload to Cloud Build small. Mirrors .dockerignore, but this
+# controls what gets uploaded at all, not just what lands in the image.
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+*.md
+*.pdf
+.env
