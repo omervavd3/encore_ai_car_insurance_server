@@ -1,11 +1,21 @@
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
+from fastapi.responses import JSONResponse
 
 from app.auth import require_api_key
 from app.schemas import ErrorResponse, VehicleRequest, VehicleResponse
 
 UPSTREAM_URL = "https://insurance-webhook-945894769129.us-central1.run.app/vehicle-info"
 TIMEOUT = 10.0
+
+# Each error code carries the HTTP status that matches its meaning, so callers
+# can route on status and still read error_code to tell the failures apart.
+ERROR_STATUS = {
+    "invalid_license_plate": status.HTTP_400_BAD_REQUEST,
+    "vehicle_not_found": status.HTTP_404_NOT_FOUND,
+    "upstream_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+    "upstream_error": status.HTTP_502_BAD_GATEWAY,
+}
 
 router = APIRouter(
     prefix="/vehicle",
@@ -14,11 +24,23 @@ router = APIRouter(
 )
 
 
-def _error(error_code: str, message: str) -> dict:
-    return {"success": False, "error_code": error_code, "message": message}
+def _error(error_code: str, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=ERROR_STATUS[error_code],
+        content={"success": False, "error_code": error_code, "message": message},
+    )
 
 
-@router.post("/info", response_model=VehicleResponse | ErrorResponse)
+@router.post(
+    "/info",
+    response_model=VehicleResponse,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
 async def vehicle_info(payload: VehicleRequest):
     plate = "".join(char for char in payload.license_plate if char.isdigit())
 
